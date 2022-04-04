@@ -1,10 +1,11 @@
 import os
 from flask import Flask, request
 from github import Github, GithubIntegration
+from github.GithubException import UnknownObjectException
 
 app = Flask(__name__)
 
-app_id = '<your_app_number_here>'
+app_id = 184667
 
 # Read the bot certificate
 with open(
@@ -19,6 +20,13 @@ git_integration = GithubIntegration(
     app_key,
 )
 
+def delete_branch(repo, branch_name):
+    try:
+        ref = repo.get_git_ref(f"heads/{branch_name}")
+        ref.delete()
+    except UnknownObjectException:
+        print('No such branch', branch_name)
+
 def pr_opened_event(repo, payload):
     pr = repo.get_issue(number=payload['pull_request']['number'])
     author = pr.user.login
@@ -30,6 +38,15 @@ def pr_opened_event(repo, payload):
                    f"The repository maintainers will look into it ASAP! :speech_balloon:"
         pr.create_comment(f"{response}")
         pr.add_to_labels("needs review")
+
+def pr_merged_event(repo, payload):
+    pr = repo.get_issue(number=payload['pull_request']['number'])
+    author = pr.user.login
+
+    response = f"You did it! Thanks for closing this pull request, @{author}! "
+    pr.create_comment(f"{response}")
+    pr.add_to_labels("closed")
+    delete_branch(repo, payload['pull_request']['head']['ref'])
 
 @app.route("/", methods=['POST'])
 def bot():
@@ -51,6 +68,9 @@ def bot():
     # Check if the event is a GitHub pull request creation event
     if all(k in payload.keys() for k in ['action', 'pull_request']) and payload['action'] == 'opened':
         pr_opened_event(repo, payload)
+
+    elif all(k in payload.keys() for k in ['action', 'pull_request']) and payload['action'] == 'closed':
+        pr_merged_event(repo, payload)
 
     return "", 204
 
